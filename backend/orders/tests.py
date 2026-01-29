@@ -91,6 +91,21 @@ class OrderServiceCheckoutTest(TestCase):
 
         self.cart.refresh_from_db()
         self.assertEqual(self.cart.status, Cart.ACTIVE)
+    
+    def test_mark_as_paid_is_idempotent(self):
+        order = OrderService.checkout(self.cart)
+        
+        OrderService.mark_as_paid(order)
+        OrderService.mark_as_paid(order)
+
+        self.assertEqual(order.status, Order.PAID)
+
+    def test_mark_canceled_order_as_paid_raises_error(self):
+        order = OrderService.checkout(self.cart)
+        OrderService.cancel(order)
+
+        with self.assertRaises(DomainError):
+            OrderService.mark_as_paid(order)
 
     def test_mark_order_as_paid_success(self):
         order = OrderService.checkout(self.cart)
@@ -99,12 +114,12 @@ class OrderServiceCheckoutTest(TestCase):
 
         self.assertEqual(paid_order.status, Order.PAID)
 
-    def test_mark_order_as_paid_non_pending_raises_error(self):
-        order = OrderService.checkout(self.cart)
-        OrderService.mark_as_paid(order)
+    # def test_mark_order_as_paid_non_pending_raises_error(self):
+    #     order = OrderService.checkout(self.cart)
+    #     OrderService.mark_as_paid(order)
 
-        with self.assertRaises(DomainError):
-            OrderService.mark_as_paid(order)
+    #     with self.assertRaises(DomainError):
+    #         OrderService.mark_as_paid(order)
 
     def test_complete_order_success(self):
         order = OrderService.checkout(self.cart)

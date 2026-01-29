@@ -68,8 +68,14 @@ class OrderService:
         return order
     
     def mark_as_paid(order: Order):
+        if order.status == Order.PAID:
+            return order
+        
+        if order.status == Order.COMPLETED:
+            return order
+        
         if order.status != Order.PENDING:
-            raise DomainError("Only pending orders can be marked as paid")
+            raise DomainError("Order cannot be marked as paid")
         
         order.status = Order.PAID
         order.save()
