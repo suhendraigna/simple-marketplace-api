@@ -5,18 +5,21 @@ from customers.models import Customer
 class Order(TimeStampedModel):
     PENDING = "PENDING"
     PAID = "PAID"
+    COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
 
     STATUS_CHOICES = [
         (PENDING, "Pending"),
         (PAID, "Paid"),
+        (COMPLETED, "Completed"),
         (CANCELLED, "Cancelled"),
     ]
 
     customer = models.ForeignKey(Customer, on_delete=models.PROTECT)
     status = models.CharField(
         max_length=20,
-        choices=STATUS_CHOICES
+        choices=STATUS_CHOICES,
+        default=PENDING
     )
     total_amount = models.DecimalField(max_digits=12, decimal_places=2)
 

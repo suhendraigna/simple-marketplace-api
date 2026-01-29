@@ -47,7 +47,6 @@ class OrderServiceCheckoutTest(TestCase):
             quantity=2
         )
 
-    
     def test_checkout_success(self):
         order = OrderService.checkout(self.cart)
 
@@ -92,6 +91,34 @@ class OrderServiceCheckoutTest(TestCase):
 
         self.cart.refresh_from_db()
         self.assertEqual(self.cart.status, Cart.ACTIVE)
+
+    def test_mark_order_as_paid_success(self):
+        order = OrderService.checkout(self.cart)
+
+        paid_order = OrderService.mark_as_paid(order)
+
+        self.assertEqual(paid_order.status, Order.PAID)
+
+    def test_mark_order_as_paid_non_pending_raises_error(self):
+        order = OrderService.checkout(self.cart)
+        OrderService.mark_as_paid(order)
+
+        with self.assertRaises(DomainError):
+            OrderService.mark_as_paid(order)
+
+    def test_complete_order_success(self):
+        order = OrderService.checkout(self.cart)
+        OrderService.mark_as_paid(order)
+
+        completed_order = OrderService.complete(order)
+        
+        self.assertEqual(completed_order.status, Order.COMPLETED)
+
+    def test_complete_non_paid_order_raises_error(self):
+        order = OrderService.checkout(self.cart)
+
+        with self.assertRaises(DomainError):
+            OrderService.complete(order)
 
     def test_cancel_order_success(self):
         order = OrderService.checkout(self.cart)
