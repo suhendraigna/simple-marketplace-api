@@ -28,3 +28,4 @@ class OrderItem(models.Model):
     product_name = models.CharField(max_length=200)
     product_price = models.DecimalField(max_digits=12, decimal_places=2)
     quantity = models.PositiveIntegerField()
+    product_sku = models.CharField(max_length=50)

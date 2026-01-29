@@ -1,17 +1,23 @@
 from django.db import transaction
 from orders.models import Order, OrderItem
 from inventory.services import InventoryService
+from core.exceptions import (
+    DomainError,
+    CartNotActiveError,
+    EmptyCartError,
+)
+import re
 
 class OrderService:
     def checkout(cart):
         # 1. validate cart
         if cart.status != cart.ACTIVE:
-            raise ValueError("Cart is not active")
+            raise CartNotActiveError("Cart is not active")
         
-        cart_items = cart.items.select_related("products")
+        cart_items = cart.items.select_related("product")
 
         if not cart_items.exists():
-            raise ValueError("Cart is empty")
+            raise EmptyCartError("Cart is empty")
 
         # 2. validate stock
         for item in cart_items:
@@ -35,10 +41,13 @@ class OrderService:
         # 5. create order items (snapshot)
         order_items = []
         for item in cart_items:
+            clean_name = re.sub(r"\s+", " ", item.product.name).strip()
+
             order_items.append(
                 OrderItem(
                     order=order,
-                    product_name=item.product.name,
+                    product_name=clean_name,
+                    product_sku=item.product.sku,
                     product_price=item.product.price,
                     quantity=item.quantity
                 )
@@ -56,4 +65,20 @@ class OrderService:
         cart.status = cart.CHECKED_OUT
         cart.save()
         
+        return order
+    
+    
+    def cancel(order: Order):
+        if order.status != order.PENDING:
+            raise DomainError("Only pending orders can be canceled")
+        
+        for item in order.items.select_related():
+            InventoryService.restore(
+                product_sku = item.product_sku,
+                qty=item.quantity
+            )
+
+        order.status = Order.CANCELLED
+        order.save()
+
         return order
