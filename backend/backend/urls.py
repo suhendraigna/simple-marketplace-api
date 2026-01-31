@@ -16,7 +16,9 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from payments.views import PaymentWebhookView
 
 urlpatterns = [
     path("api/orders/", include("orders.urls")),
+    path("webhooks/payment/", PaymentWebhookView.as_view())
 ]

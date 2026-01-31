@@ -7,11 +7,14 @@ from cart.models import Cart, CartItem
 from inventory.models import Inventory
 from orders.services import OrderService
 from orders.models import Order
+from payments.models.refund import Refund
+from payments.services.refund_service import RefundService
 from core.exceptions import(
     DomainError,
     EmptyCartError,
     InsufficientStockError
 )
+import pytest
 
 class OrderServiceCheckoutTest(TestCase):
     def setUp(self):
@@ -169,3 +172,43 @@ class OrderServiceCheckoutTest(TestCase):
 
         inventory_after = Inventory.objects.get(product=self.product).quantity_available
         self.assertEqual(inventory_after, inventory_before + 2)
+
+    def test_partial_refund_success(payment):
+        refund = RefundService().create_refund(
+            payment_id=payment.id,
+            amount=300,
+            idempotency_key="refund-1",
+        )
+
+        assert refund.status == Refund.status.SUCCESS
+        assert payment.refundable_amount == payment.amount - 300
+
+    def test_refund_exceed_balance_raises(payment):
+        RefundService().create_refund(
+            payment=payment.id,
+            amount=500,
+            idempotency_key="refund-1",
+        )
+
+        with pytest.raises(DomainError):
+            RefundService().create_refund(
+                payment_id=payment.id,
+                amount=600,
+                idempotency_key="refund-2",
+            )
+
+    def test_refund_idempotent(payment):
+        r1 = RefundService().create_refund(
+            payment_id=payment.id,
+            amount=200,
+            idempotency_key="same-key",
+        )
+
+        r2 = RefundService().create_refund(
+            payment_id=payment.id,
+            amount=999,
+            idempotency_key="same-key",
+        )
+
+        assert r1.id == r2.id
+        assert r2.amount == 200

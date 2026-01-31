@@ -1,5 +1,6 @@
 from django.db import transaction
 from orders.models import Order, OrderItem
+from orders.state_machine import OrderStateMachine
 from inventory.services import InventoryService
 from core.exceptions import (
     DomainError,
@@ -9,98 +10,118 @@ from core.exceptions import (
 import re
 
 class OrderService:
+
+    @staticmethod
     def checkout(cart):
-        # 1. validate cart
-        if cart.status != cart.ACTIVE:
-            raise CartNotActiveError("Cart is not active")
-        
-        cart_items = cart.items.select_related("product")
+        with transaction.atomic():
+            # 1. validate cart
+            if cart.status != cart.ACTIVE:
+                raise CartNotActiveError("Cart is not active")
+            
+            cart_items = cart.items.select_related("product")
 
-        if not cart_items.exists():
-            raise EmptyCartError("Cart is empty")
+            if not cart_items.exists():
+                raise EmptyCartError("Cart is empty")
 
-        # 2. validate stock
-        for item in cart_items:
-            InventoryService.check_availability(
-                product=item.product,
-                qty=item.quantity
-            )
-
-        # 3. count total
-        total_amount = 0
-        for item in cart_items:
-            total_amount += item.product.price * item.quantity
-
-        # 4. create order
-        order = Order.objects.create(
-            customer=cart.customer,
-            status=Order.PENDING,
-            total_amount=total_amount
-        )
-
-        # 5. create order items (snapshot)
-        order_items = []
-        for item in cart_items:
-            clean_name = re.sub(r"\s+", " ", item.product.name).strip()
-
-            order_items.append(
-                OrderItem(
-                    order=order,
-                    product_name=clean_name,
-                    product_sku=item.product.sku,
-                    product_price=item.product.price,
-                    quantity=item.quantity
+            # 2. validate stock
+            for item in cart_items:
+                InventoryService.check_availability(
+                    product=item.product,
+                    qty=item.quantity
                 )
-            )
-        OrderItem.objects.bulk_create(order_items)
 
-        # 6. reduce stock
-        for item in cart_items:
-            InventoryService.reduce(
-                product=item.product,
-                qty=item.quantity
+            # 3. count total
+            total_amount = 0
+            for item in cart_items:
+                total_amount += item.product.price * item.quantity
+
+            # 4. create order
+            order = Order.objects.create(
+                customer=cart.customer,
+                status=Order.PENDING,
+                total_amount=total_amount
             )
 
-        # 7. update cart status
-        cart.status = cart.CHECKED_OUT
-        cart.save()
-        
-        return order
+            # 5. create order items (snapshot)
+            order_items = []
+            for item in cart_items:
+                clean_name = re.sub(r"\s+", " ", item.product.name).strip()
+
+                order_items.append(
+                    OrderItem(
+                        order=order,
+                        product_name=clean_name,
+                        product_sku=item.product.sku,
+                        product_price=item.product.price,
+                        quantity=item.quantity
+                    )
+                )
+            OrderItem.objects.bulk_create(order_items)
+
+            # 6. reduce stock
+            for item in cart_items:
+                InventoryService.reduce(
+                    product=item.product,
+                    qty=item.quantity
+                )
+
+            # 7. update cart status
+            cart.status = cart.CHECKED_OUT
+            cart.save()
+            
+            return order
     
-    def mark_as_paid(order: Order):
-        if order.status == Order.PAID:
+    @staticmethod
+    def mark_as_paid(order_id):
+        with transaction.atomic():
+            order = (
+                Order.objects.select_for_update().get(id=order_id)
+            )
+
+            if order.status == Order.PAID:
+                return order 
+        
+            new_status = OrderStateMachine.next_state(
+                order.status,
+                "pay"
+            )
+
+            order.status = new_status
+            order.save()
             return order
         
-        if order.status == Order.COMPLETED:
-            return order
-        
-        if order.status != Order.PENDING:
-            raise DomainError("Order cannot be marked as paid")
-        
-        order.status = Order.PAID
-        order.save()
-        
-        return order
-    
-    def complete(order: Order):
-        if order.status != Order.PAID:
-            raise DomainError("Only paid orders can be completed")
-        
-        order.status = Order.COMPLETED
-        order.save()
-        return order
-    
-    def cancel(order: Order):
-        if order.status != order.PENDING:
-            raise DomainError("Only pending orders can be canceled")
-        
-        for item in order.items.select_related():
-            InventoryService.restore(
-                product_sku = item.product_sku,
-                qty=item.quantity
+    @staticmethod
+    def complete(order_id):
+        with transaction.atomic():
+            order = (
+                Order.objects.select_for_update().get(id=order_id)
             )
 
-        order.status = Order.CANCELLED
-        order.save()
+            if order.status == Order.COMPLETED:
+                return order
 
-        return order
+            new_status = OrderStateMachine.next_state(
+                order.status, "complete"
+            )
+
+            order.status = new_status
+            order.save()
+            return order
+        
+    @staticmethod
+    def cancel(order_id):
+        with transaction.atomic():
+            order = (
+                Order.objects.select_for_update().get(id=order_id)
+            )
+            
+            if order.status == Order.CANCELED:
+                return order
+
+            new_status = OrderStateMachine.next_state(
+                order.status, "cancel"
+            )
+            
+            order.status = new_status
+            order.save()
+            return order
